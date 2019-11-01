@@ -1,0 +1,15 @@
+-srcNodeId	1	-dstNodeId	2	-Cap	50
+-srcNodeId	1	-dstNodeId	3	-Cap	50
+-srcNodeId	1	-dstNodeId	5	-Cap	50
+-srcNodeId	2	-dstNodeId	4	-Cap	50
+-srcNodeId	3	-dstNodeId	4	-Cap	50
+-srcNodeId	3	-dstNodeId	5	-Cap	50
+-srcNodeId	3	-dstNodeId	6	-Cap	50
+-srcNodeId	4	-dstNodeId	7	-Cap	50
+-srcNodeId	6	-dstNodeId	7	-Cap	50
+-srcNodeId	6	-dstNodeId	8	-Cap	100
+-srcNodeId	7	-dstNodeId	8	-Cap	100
+-srcNodeId	7	-dstNodeId	9	-Cap	100
+-srcNodeId	8	-dstNodeId	9	-Cap	100
+-srcNodeId	8	-dstNodeId	10	-Cap	150
+-srcNodeId	9	-dstNodeId	10	-Cap	100
