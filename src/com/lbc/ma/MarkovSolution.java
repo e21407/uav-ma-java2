@@ -144,13 +144,14 @@ public class MarkovSolution {
         for (Workflow wf : workflows) {
             for (Flow flow : wf.flows) {
                 // 分配任务到节点
-                int currTaskNodeId = checkWetherATaskHasAssignment(flow.currTask);
-                int succTaskNodeId = checkWetherATaskHasAssignment(flow.succTask);
+                int currTaskNodeId = checkWhetherATaskHasAssignment(flow.currTask);
+                int succTaskNodeId = checkWhetherATaskHasAssignment(flow.succTask);
                 if (-1 == currTaskNodeId) {
                     int nodeIdx = random.nextInt(uavNodes.size());
                     currTaskNodeId = uavNodes.get(nodeIdx).nodeId;
                     // 避免succTask已分配的情况下currTask和succTask分配到同一个节点
                     while (currTaskNodeId == succTaskNodeId) {
+                        nodeIdx = random.nextInt(uavNodes.size());
                         currTaskNodeId = uavNodes.get(nodeIdx).nodeId;
                     }
                     XVar xVar = new XVar(wf.workflowId, flow.currTask.taskId, currTaskNodeId);
@@ -161,6 +162,7 @@ public class MarkovSolution {
                     succTaskNodeId = uavNodes.get(nodeIdx).nodeId;
                     // 避免currTask和succTask分配到同一个节点
                     while (currTaskNodeId == succTaskNodeId) {
+                        nodeIdx = random.nextInt(uavNodes.size());
                         succTaskNodeId = uavNodes.get(nodeIdx).nodeId;
                     }
                     XVar xVar = new XVar(wf.workflowId, flow.succTask.taskId, succTaskNodeId);
@@ -181,7 +183,7 @@ public class MarkovSolution {
      * @param task
      * @return 若已分配返回该任务分配的nodeId，否则返回-1
      */
-    private int checkWetherATaskHasAssignment(Task task) {
+    private int checkWhetherATaskHasAssignment(Task task) {
         for (XVar xVar : xVars) {
             if (xVar.workflowId == task.workflowId && xVar.taskId == task.taskId) {
                 return xVar.nodeId;
@@ -193,13 +195,115 @@ public class MarkovSolution {
     private int selectRandomPathFor2Nodes(int u, int v) {
         String pathSetKey = u < v ? u + "_" + v : v + "_" + u;
         List<Integer> candPathIds = candPathIdFor2Nodes.get(pathSetKey);
-        if (candPathIds == null){
+        if (candPathIds == null) {
             System.out.println("hit");
         }
         int pathIdx = random.nextInt(candPathIds.size());
         return candPathIds.get(pathIdx);
     }
 
+    // todo 人工检查一下计算结果是否正确
+    public SystemMetrics calculateSystemMetrics(Set<XVar> xVars, Set<YVar> yVars) {
+        Map<Integer, Double> nodeLoadInfo = new HashMap<>();
+        for (XVar xVar : xVars) {
+            int nodeId = xVar.nodeId;
+            Node node = findNodeById(nodeId);
+            Task task = findTask(xVar.workflowId, xVar.taskId);
+            double newNodeLoad = task.neededResource / node.capacity;
+            Double nodeLoad = nodeLoadInfo.get(nodeId);
+            if (null == nodeLoad) {
+                nodeLoad = 0.0;
+            }
+            nodeLoad += newNodeLoad;
+            nodeLoadInfo.put(nodeId, nodeLoad);
+        }
+        Map<Link, Double> linkLoadInfo = new HashMap<>();
+        double throughput = 0;
+        for (YVar yVar : yVars) {
+            Flow flow = findFlow(yVar.workflowId, yVar.currTaskId, yVar.succTaskId);
+            throughput += flow.neededBandwidth;
+            String pathContent = paths.get(yVar.pathId);
+            String[] nodesInPath = pathContent.split(">");
+            for (int i = 0; i < nodesInPath.length - 1; i++){
+                Link link = findLink(Integer.valueOf(nodesInPath[i]), Integer.valueOf(nodesInPath[i+1]));
+                double newLinkLoad = flow.neededBandwidth / link.bandwidth;
+                Double linkLoad = linkLoadInfo.get(link);
+                if (null == linkLoad) {
+                    linkLoad = 0.0;
+                }
+                linkLoad += newLinkLoad;
+                linkLoadInfo.put(link, linkLoad);
+            }
+        }
+
+        double computeCost = 0;
+        for (Map.Entry<Integer, Double> nodeLoadEntry : nodeLoadInfo.entrySet()) {
+            computeCost += Math.pow(nodeLoadEntry.getValue(), 2);
+        }
+        double routingCost = 0;
+        for (Map.Entry<Link, Double> linkLoadEntry : linkLoadInfo.entrySet()) {
+            routingCost += Math.pow(linkLoadEntry.getValue(), 2);
+        }
+        return new SystemMetrics(throughput, computeCost, routingCost);
+    }
+
+    private Flow findFlow(int wfId, int currTaskId, int succTaskId) {
+        for (Workflow wf : workflows) {
+            if (wf.workflowId != wfId)
+                continue;
+            for (Flow f : wf.flows) {
+                if (f.currTask.taskId == currTaskId && f.succTask.taskId == succTaskId) {
+                    return f;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Link findLink(int u, int v) {
+        for (Link link : links) {
+            if (link.srcNodeId == u && link.dstNodeId == v) {
+                return link;
+            }
+            if (link.dstNodeId == u && link.srcNodeId == v) {
+                return link;
+            }
+        }
+        return null;
+    }
+
+    private int findNodeIdOfTask(int wfId, int taskId, Set<XVar> xVars) {
+        for (XVar xVar : xVars) {
+            if (xVar.workflowId == wfId && xVar.taskId == taskId) {
+                return xVar.taskId;
+            }
+        }
+        return -1;
+    }
+
+    private Task findTask(int wfId, int taskId) {
+        for (Workflow wf : workflows) {
+            if (wf.workflowId != wfId) {
+                continue;
+            }
+            Set<Task> tasks = wf.getTasks();
+            for (Task t : tasks) {
+                if (t.taskId == taskId) {
+                    return t;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Node findNodeById(int nodeId) {
+        for (Node node : nodes) {
+            if (node.nodeId == nodeId) {
+                return node;
+            }
+        }
+        return null;
+    }
 
 
     public List<Node> getNodes() {
@@ -217,6 +321,7 @@ public class MarkovSolution {
     public List<Workflow> getWorkflows() {
         return workflows;
     }
+
 
     public Set<XVar> getxVars() {
         return xVars;

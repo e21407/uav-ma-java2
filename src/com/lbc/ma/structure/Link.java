@@ -10,4 +10,17 @@ public class Link {
         this.dstNodeId = dstNodeId;
         this.bandwidth = bandwidth;
     }
+
+    @Override
+    public int hashCode() {
+        int result = 17;
+        result = 31 * result + srcNodeId;
+        result = 31 * result + dstNodeId;
+        return result;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        return obj instanceof Link && ((Link) obj).srcNodeId == this.srcNodeId && ((Link) obj).dstNodeId == dstNodeId;
+    }
 }

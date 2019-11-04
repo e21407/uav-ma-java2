@@ -15,12 +15,15 @@ public class Task {
     @Override
     public boolean equals(Object obj) {
         return obj instanceof Task && ((Task) obj).workflowId.intValue() == this.workflowId.intValue()
-				&& ((Task) obj).taskId.intValue() == this.taskId.intValue();
+                && ((Task) obj).taskId.intValue() == this.taskId.intValue();
     }
 
-	@Override
-	public int hashCode() {
-		return this.workflowId + this.taskId;
-	}
+    @Override
+    public int hashCode() {
+        int result = 17;
+        result = 31 * result + workflowId;
+        result = 31 * result + taskId;
+        return result;
+    }
 
 }

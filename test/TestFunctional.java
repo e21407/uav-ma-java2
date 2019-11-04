@@ -1,8 +1,5 @@
 import com.lbc.ma.MarkovSolution;
-import com.lbc.ma.structure.Link;
-import com.lbc.ma.structure.Node;
-import com.lbc.ma.structure.Task;
-import com.lbc.ma.structure.Workflow;
+import com.lbc.ma.structure.*;
 import com.lbc.ma.tool.FileTool;
 import org.junit.Assert;
 import org.junit.Test;
@@ -42,6 +39,9 @@ public class TestFunctional {
         }
         Assert.assertEquals(taskNum, solution.getxVars().size());
         Assert.assertEquals(flowNum, solution.getyVars().size());
+        // calculate system metrics
+        SystemMetrics systemMetrics = solution.calculateSystemMetrics(solution.getxVars(), solution.getyVars());
+        Assert.assertNotNull(systemMetrics);
     }
 
     @Test
