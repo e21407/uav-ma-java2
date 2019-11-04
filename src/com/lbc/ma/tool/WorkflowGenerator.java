@@ -31,12 +31,13 @@ public class WorkflowGenerator {
 
     public static synchronized WorkflowGenerator getWorkflowGenerator(String workflowModelFilePath) {
         if (null == workflowGenerator){
-            initializeWorkflowModel(workflowModelFilePath);
+            initialize(workflowModelFilePath);
         }
         return workflowGenerator;
     }
 
-    private static  void initializeWorkflowModel(String workflowModelFilePath) {
+    private static  void initialize(String workflowModelFilePath) {
+        workflowGenerator = new WorkflowGenerator();
         String strFileContent = FileTool.getStringFromFile(workflowModelFilePath);
 
         String[] lineOfContent = strFileContent.split("\r\n");
@@ -73,7 +74,7 @@ public class WorkflowGenerator {
         int exampleSetSize = exampleWorkflows.size();
         idx = idx % exampleSetSize;
         Integer WF_ID = ++workflow_idx;
-        Workflow wf = new Workflow(WF_ID, null, null);
+        Workflow wf = new Workflow(WF_ID, null);
         Set<Task> tasks = new HashSet<>();
         Vector<Flow> exampleWorkflow = exampleWorkflows.get(idx);
         Random random = new Random();
@@ -81,13 +82,13 @@ public class WorkflowGenerator {
             double bandwidth = random.nextInt(rdmBandwidth) + baseBandwidth;
             double curTaskCap = random.nextInt(taskRdmCap) + taskBaseCap;
             double sucTaskCap = random.nextInt(taskRdmCap) + taskBaseCap;
-            Task currTask = new Task(WF_ID, f.getCurrTask().getTaskId(), curTaskCap);
+            Task currTask = new Task(WF_ID, f.currTask.taskId, curTaskCap);
             if (!tasks.add(currTask)) {
-                currTask = getTaskFromSet(tasks, f.getCurrTask().getTaskId());
+                currTask = getTaskFromSet(tasks, f.currTask.taskId);
             }
-            Task succTask = new Task(WF_ID, f.getSuccTask().getTaskId(), sucTaskCap);
+            Task succTask = new Task(WF_ID, f.succTask.taskId, sucTaskCap);
             if (!tasks.add(succTask)) {
-                succTask = getTaskFromSet(tasks, f.getSuccTask().getTaskId());
+                succTask = getTaskFromSet(tasks, f.succTask.taskId);
             }
             Flow toAddFlow = new Flow(currTask, succTask, bandwidth);
             wf.addFlow(toAddFlow);
@@ -97,7 +98,7 @@ public class WorkflowGenerator {
 
     private Task getTaskFromSet(Set<Task> taskSet, Integer taskId) {
         for (Task task : taskSet) {
-            if (task.getTaskId().intValue() == taskId.intValue()) {
+            if (task.taskId.intValue() == taskId.intValue()) {
                 return task;
             }
         }

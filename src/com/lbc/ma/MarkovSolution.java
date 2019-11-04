@@ -1,8 +1,6 @@
 package com.lbc.ma;
 
-import com.lbc.ma.structure.Link;
-import com.lbc.ma.structure.Node;
-import com.lbc.ma.structure.Workflow;
+import com.lbc.ma.structure.*;
 import com.lbc.ma.tool.FileTool;
 import com.lbc.ma.tool.WorkflowGenerator;
 import org.apache.log4j.Logger;
@@ -13,8 +11,11 @@ import java.util.*;
 public class MarkovSolution {
     static protected Logger logger = Logger.getLogger(MarkovSolution.class);
     Properties configProperties;
+    WorkflowGenerator workflowGenerator;
+    static Random random = new Random();
 
     private List<Node> nodes;
+    private List<Node> uavNodes;
     private List<Link> links;
     /**
      * <src_dst, pathIds>: <"1_2", [1,2,3,...]>
@@ -27,13 +28,22 @@ public class MarkovSolution {
 
     private List<Workflow> workflows;
 
+    private Set<XVar> xVars;
+
+    private Set<YVar> yVars;
+
     public MarkovSolution(Properties properties) {
         this.configProperties = properties;
         nodes = new ArrayList<>();
+        uavNodes = new ArrayList<>();
         links = new ArrayList<>();
         candPathIdFor2Nodes = new HashMap<>();
         paths = new HashMap<>();
         workflows = new ArrayList<>();
+        xVars = new HashSet<>();
+        yVars = new HashSet<>();
+        workflowGenerator = getWorkflowGenerator();
+        generateOriginalWorkflow();
     }
 
     // ↓↓↓↓↓↓↓↓↓↓↓↓↓read data from file↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
@@ -82,6 +92,9 @@ public class MarkovSolution {
             Double nodeCapacity = Double.valueOf(lineContent[3]);
             Node node = new Node(nodeType, nodeId, nodeCapacity);
             nodes.add(node);
+            if ("U_ID".equals(nodeType)) {
+                uavNodes.add(node);
+            }
         }
     }
 
@@ -109,10 +122,85 @@ public class MarkovSolution {
     }
     // ↑↑↑↑↑↑↑↑↑↑↑↑↑↑read data from file↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-    private void generateWorkflow(){
-        WorkflowGenerator workflowGenerator = WorkflowGenerator.getWorkflowGenerator();
-
+    private WorkflowGenerator getWorkflowGenerator() {
+        String workflowModeFilePath = configProperties.getProperty("workflowModeFilePath");
+        WorkflowGenerator workflowGenerator = WorkflowGenerator.getWorkflowGenerator(workflowModeFilePath);
+        return workflowGenerator;
     }
+
+    private void generateOriginalWorkflow() {
+        int originalWorkflowNum = Integer.valueOf(configProperties.getProperty("originalWorkflowNum"));
+        int taskBaseCap = Integer.valueOf(configProperties.getProperty("taskBaseCap"));
+        int taskRdmCap = Integer.valueOf(configProperties.getProperty("taskRdmCap"));
+        int bandwidthBase = Integer.valueOf(configProperties.getProperty("bandwidthBase"));
+        int bandwidthRdm = Integer.valueOf(configProperties.getProperty("bandwidthRdm"));
+        while (originalWorkflowNum-- > 0) {
+            Workflow workflow = workflowGenerator.generateWorkflow(0, taskBaseCap, taskRdmCap, bandwidthBase, bandwidthRdm);
+            workflows.add(workflow);
+        }
+    }
+
+    public void assignTask() {
+        for (Workflow wf : workflows) {
+            for (Flow flow : wf.flows) {
+                // 分配任务到节点
+                int currTaskNodeId = checkWetherATaskHasAssignment(flow.currTask);
+                int succTaskNodeId = checkWetherATaskHasAssignment(flow.succTask);
+                if (-1 == currTaskNodeId) {
+                    int nodeIdx = random.nextInt(uavNodes.size());
+                    currTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                    // 避免succTask已分配的情况下currTask和succTask分配到同一个节点
+                    while (currTaskNodeId == succTaskNodeId) {
+                        currTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                    }
+                    XVar xVar = new XVar(wf.workflowId, flow.currTask.taskId, currTaskNodeId);
+                    xVars.add(xVar);
+                }
+                if (-1 == succTaskNodeId) {
+                    int nodeIdx = random.nextInt(uavNodes.size());
+                    succTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                    // 避免currTask和succTask分配到同一个节点
+                    while (currTaskNodeId == succTaskNodeId) {
+                        succTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                    }
+                    XVar xVar = new XVar(wf.workflowId, flow.succTask.taskId, succTaskNodeId);
+                    xVars.add(xVar);
+                }
+
+                // 为flow选择通讯路径
+                int pathId = selectRandomPathFor2Nodes(currTaskNodeId, succTaskNodeId);
+                YVar yVar = new YVar(wf.workflowId, pathId, flow.currTask.taskId, flow.succTask.taskId);
+                yVars.add(yVar);
+            }
+        }
+    }
+
+    /**
+     * 检查一个任务是否已经被分配
+     *
+     * @param task
+     * @return 若已分配返回该任务分配的nodeId，否则返回-1
+     */
+    private int checkWetherATaskHasAssignment(Task task) {
+        for (XVar xVar : xVars) {
+            if (xVar.workflowId == task.workflowId && xVar.taskId == task.taskId) {
+                return xVar.nodeId;
+            }
+        }
+        return -1;
+    }
+
+    private int selectRandomPathFor2Nodes(int u, int v) {
+        String pathSetKey = u < v ? u + "_" + v : v + "_" + u;
+        List<Integer> candPathIds = candPathIdFor2Nodes.get(pathSetKey);
+        if (candPathIds == null){
+            System.out.println("hit");
+        }
+        int pathIdx = random.nextInt(candPathIds.size());
+        return candPathIds.get(pathIdx);
+    }
+
+
 
     public List<Node> getNodes() {
         return nodes;
@@ -124,5 +212,17 @@ public class MarkovSolution {
 
     public Map<Integer, String> getPaths() {
         return paths;
+    }
+
+    public List<Workflow> getWorkflows() {
+        return workflows;
+    }
+
+    public Set<XVar> getxVars() {
+        return xVars;
+    }
+
+    public Set<YVar> getyVars() {
+        return yVars;
     }
 }

@@ -1,19 +1,19 @@
 import com.lbc.ma.MarkovSolution;
 import com.lbc.ma.structure.Link;
 import com.lbc.ma.structure.Node;
+import com.lbc.ma.structure.Task;
+import com.lbc.ma.structure.Workflow;
 import com.lbc.ma.tool.FileTool;
 import org.junit.Assert;
 import org.junit.Test;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 
 public class TestFunctional {
     final static String CONFIG_FILE = "config.properties";
 
     @Test
-    public void testReadData(){
+    public void testReadData() {
         Properties configProperties = FileTool.loadPropertiesFromFile(CONFIG_FILE);
         MarkovSolution solution = new MarkovSolution(configProperties);
         solution.initializeData();
@@ -32,6 +32,30 @@ public class TestFunctional {
         String linksInfoFilePath = configProperties.getProperty("linksInfoFilePath");
         split = FileTool.getStringFromFile(linksInfoFilePath).split("\r\n");
         Assert.assertEquals(split.length, links.size());
+        // assign task
+        solution.assignTask();
+        int taskNum = 0;
+        int flowNum = 0;
+        for(Workflow wf : solution.getWorkflows()){
+            taskNum += wf.getTasks().size();
+            flowNum += wf.flows.size();
+        }
+        Assert.assertEquals(taskNum, solution.getxVars().size());
+        Assert.assertEquals(flowNum, solution.getyVars().size());
+    }
+
+    @Test
+    public void testSomething() {
+        Set<Task> set = new HashSet<>();
+        Task task = new Task(1,3,90.0);
+        set.add(task);
+        for(Task t : set){
+            System.out.println(t.workflowId + " " + t.taskId + " " + t.neededResource);
+        }
+        task.neededResource = 66.6;
+        for(Task t : set){
+            System.out.println(t.workflowId + " " + t.taskId + " " + t.neededResource);
+        }
     }
 
 }

@@ -12,17 +12,13 @@ import java.util.Set;
 
 public class Workflow {
 
-	private Integer WF_ID;
+	public Integer workflowId;
 
-	/** 工作流持续的时长 */
-	private Double duration;
+	public ArrayList<Flow> flows;
 
-	private ArrayList<Flow> flows;
-
-	public Workflow(Integer wF_ID, Double duration, ArrayList<Flow> flows) {
+	public Workflow(Integer wF_ID, ArrayList<Flow> flows) {
 		super();
-		WF_ID = wF_ID;
-		this.duration = duration;
+		workflowId = wF_ID;
 		if (flows == null) {
 			this.flows = new ArrayList<Flow>();
 		} else {
@@ -40,34 +36,10 @@ public class Workflow {
 	public Set<Task> getTasks(){
 		Set<Task> result = new HashSet<>();
 		for(Flow flows : flows){
-			result.add(flows.getCurrTask());
-			result.add(flows.getSuccTask());
+			result.add(flows.currTask);
+			result.add(flows.succTask);
 		}
 		return result;
-	}
-
-	public Integer getWF_ID() {
-		return WF_ID;
-	}
-
-	public void setWF_ID(Integer wF_ID) {
-		WF_ID = wF_ID;
-	}
-
-	public Double getDuration() {
-		return duration;
-	}
-
-	public void setDuration(Double duration) {
-		this.duration = duration;
-	}
-
-	public ArrayList<Flow> getFlows() {
-		return flows;
-	}
-
-	public void setFlows(ArrayList<Flow> flows) {
-		this.flows = flows;
 	}
 
 }
