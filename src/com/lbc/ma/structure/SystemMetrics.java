@@ -10,4 +10,8 @@ public class SystemMetrics {
         this.computeCost = computeCost;
         this.routingCost = routingCost;
     }
+
+    public double getPerformance(){
+        return  throughput - computeCost - routingCost;
+    }
 }

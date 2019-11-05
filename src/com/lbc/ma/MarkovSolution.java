@@ -3,16 +3,22 @@ package com.lbc.ma;
 import com.lbc.ma.structure.*;
 import com.lbc.ma.tool.FileTool;
 import com.lbc.ma.tool.WorkflowGenerator;
+import org.apache.commons.math3.distribution.EnumeratedDistribution;
+import org.apache.commons.math3.util.Pair;
 import org.apache.log4j.Logger;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class MarkovSolution {
     static protected Logger logger = Logger.getLogger(MarkovSolution.class);
     Properties configProperties;
     WorkflowGenerator workflowGenerator;
     static Random random = new Random();
+
+    private static int MAX_THREAD_COUNT = 16;
+    private Executor executor = Executors.newFixedThreadPool(MAX_THREAD_COUNT);
 
     private List<Node> nodes;
     private List<Node> uavNodes;
@@ -28,9 +34,9 @@ public class MarkovSolution {
 
     private List<Workflow> workflows;
 
-    private Set<XVar> xVars;
+    private List<XVar> xVars;
 
-    private Set<YVar> yVars;
+    private List<YVar> yVars;
 
     public MarkovSolution(Properties properties) {
         this.configProperties = properties;
@@ -40,8 +46,8 @@ public class MarkovSolution {
         candPathIdFor2Nodes = new HashMap<>();
         paths = new HashMap<>();
         workflows = new ArrayList<>();
-        xVars = new HashSet<>();
-        yVars = new HashSet<>();
+        xVars = new ArrayList<>();
+        yVars = new ArrayList<>();
         workflowGenerator = getWorkflowGenerator();
         generateOriginalWorkflow();
     }
@@ -192,6 +198,11 @@ public class MarkovSolution {
         return -1;
     }
 
+    /**
+     * @param u 开始节点的id
+     * @param v 终点节点的id
+     * @return 路径id
+     */
     private int selectRandomPathFor2Nodes(int u, int v) {
         String pathSetKey = u < v ? u + "_" + v : v + "_" + u;
         List<Integer> candPathIds = candPathIdFor2Nodes.get(pathSetKey);
@@ -202,8 +213,7 @@ public class MarkovSolution {
         return candPathIds.get(pathIdx);
     }
 
-    // todo 人工检查一下计算结果是否正确
-    public SystemMetrics calculateSystemMetrics(Set<XVar> xVars, Set<YVar> yVars) {
+    public SystemMetrics calculateSystemMetrics(List<XVar> xVars, List<YVar> yVars) {
         Map<Integer, Double> nodeLoadInfo = new HashMap<>();
         for (XVar xVar : xVars) {
             int nodeId = xVar.nodeId;
@@ -224,8 +234,8 @@ public class MarkovSolution {
             throughput += flow.neededBandwidth;
             String pathContent = paths.get(yVar.pathId);
             String[] nodesInPath = pathContent.split(">");
-            for (int i = 0; i < nodesInPath.length - 1; i++){
-                Link link = findLink(Integer.valueOf(nodesInPath[i]), Integer.valueOf(nodesInPath[i+1]));
+            for (int i = 0; i < nodesInPath.length - 1; i++) {
+                Link link = findLink(Integer.parseInt(nodesInPath[i]), Integer.parseInt(nodesInPath[i + 1]));
                 double newLinkLoad = flow.neededBandwidth / link.bandwidth;
                 Double linkLoad = linkLoadInfo.get(link);
                 if (null == linkLoad) {
@@ -272,15 +282,6 @@ public class MarkovSolution {
         return null;
     }
 
-    private int findNodeIdOfTask(int wfId, int taskId, Set<XVar> xVars) {
-        for (XVar xVar : xVars) {
-            if (xVar.workflowId == wfId && xVar.taskId == taskId) {
-                return xVar.taskId;
-            }
-        }
-        return -1;
-    }
-
     private Task findTask(int wfId, int taskId) {
         for (Workflow wf : workflows) {
             if (wf.workflowId != wfId) {
@@ -305,6 +306,144 @@ public class MarkovSolution {
         return null;
     }
 
+    private int findNodeIdOfTask(int wfId, int taskId, List<XVar> xVars) {
+        for (XVar xVar : xVars) {
+            if (xVar.workflowId == wfId && xVar.taskId == taskId) {
+                return xVar.taskId;
+            }
+        }
+        return -1;
+    }
+
+    public Action switchSolution() throws InterruptedException, ExecutionException {
+        int count = 16;
+        List<List<Flow>> flowList = split(workflows, count);
+        CompletionService<List<Pair<Action,Double>>> completionService = new ExecutorCompletionService<>(executor);
+        for(List<Flow> flowsToSetAction : flowList){
+            completionService.submit(()->setActions(flowsToSetAction, xVars, yVars));
+        }
+        List<Pair<Action,Double>> actions = new ArrayList<>();
+        for(int i = 0; i < flowList.size(); i++){
+            List<Pair<Action, Double>> resultActions = completionService.take().get();
+            if (null == resultActions){
+                System.out.println("多线程设置Action失败");
+                System.exit(-1);
+            }
+            actions.addAll(resultActions);
+        }
+        EnumeratedDistribution<Action> distribution = new EnumeratedDistribution<>(actions);
+        return distribution.sample();
+    }
+
+    private List<Pair<Action, Double>> setActions(List<Flow> flows, List<XVar> xVars, List<YVar> yVars) throws CloneNotSupportedException {
+        List<Pair<Action, Double>> ret = new ArrayList<>();
+        for (Flow flow : flows) {
+            Integer workflowId = flow.currTask.workflowId;
+            Task currTask = flow.currTask;
+            Task succTask = flow.succTask;
+            int nodeIdOfSuccTask = findNodeIdOfTask(succTask.workflowId, succTask.taskId, xVars);
+            int nodeIdx = random.nextInt(nodes.size());
+            Node newNodeForSuccTask = nodes.get(nodeIdx);
+            // 避免分配到原来节点
+            while (nodeIdOfSuccTask == newNodeForSuccTask.nodeId) {
+                nodeIdx = random.nextInt(nodes.size());
+                newNodeForSuccTask = nodes.get(nodeIdx);
+            }
+            List<XVar> xVarsCopy = new ArrayList<>();
+            for(XVar x: xVars){
+                xVarsCopy.add((XVar) x.clone());
+            }
+            removeXVar(workflowId, succTask.taskId, xVarsCopy);
+            XVar newXVar = new XVar(workflowId, succTask.taskId, newNodeForSuccTask.nodeId);
+            xVarsCopy.add(newXVar);
+
+            List<YVar> yVarsCopy = new ArrayList<>();
+            for(YVar y : yVars){
+                yVarsCopy.add((YVar) y.clone());
+            }
+            removeYVar(workflowId, currTask.taskId, succTask.taskId, yVarsCopy);
+            int nodeIdOfCurrTask = findNodeIdOfTask(workflowId, currTask.taskId, xVarsCopy);
+            int newPathId = selectRandomPathFor2Nodes(nodeIdOfCurrTask, newNodeForSuccTask.nodeId);
+            YVar newYVar = new YVar(workflowId, newPathId, currTask.taskId, succTask.taskId);
+            yVarsCopy.add(newYVar);
+
+            SystemMetrics oldSystemMetrics = calculateSystemMetrics(xVars, yVars);
+            SystemMetrics newSystemMetrics = calculateSystemMetrics(xVarsCopy, yVarsCopy);
+            double improvement = calculateImprovement(oldSystemMetrics, newSystemMetrics);
+            Action action = new Action(workflowId, currTask.taskId, succTask.taskId, newPathId, nodeIdOfSuccTask, newNodeForSuccTask.nodeId);
+            Pair<Action, Double> pair = new Pair<>(action, improvement);
+            ret.add(pair);
+        }
+        return ret;
+    }
+
+    private double calculateImprovement(SystemMetrics oldSystemMetrics, SystemMetrics newSystemMetrics) {
+        double oldPerformance = oldSystemMetrics.getPerformance();
+        double newPerformance = newSystemMetrics.getPerformance();
+        double beta = Double.parseDouble((String) configProperties.get("beta"));
+        return Math.exp(0.5 * beta * (newPerformance - oldPerformance));
+    }
+
+    private void removeYVar(int wfId, int currTaskId, int succTaskId, List<YVar> yVars) {
+        Iterator<YVar> iterator = yVars.iterator();
+        while (iterator.hasNext()){
+            YVar yVar = iterator.next();
+            if (yVar.workflowId == wfId && yVar.currTaskId == currTaskId && yVar.succTaskId == succTaskId) {
+                iterator.remove();
+            }
+        }
+    }
+
+    private void removeXVar(int wfId, int taskId, List<XVar> xVars) {
+        Iterator<XVar> iterator = xVars.iterator();
+        while (iterator.hasNext()){
+            XVar xVar = iterator.next();
+            if (xVar.workflowId == wfId && xVar.taskId == taskId) {
+                iterator.remove();
+            }
+        }
+    }
+
+    /**
+     * 拆分工作流集合
+     *
+     * @param workflows 要拆分的工作流
+     * @param count     每个集合元素个数
+     * @return 返回拆分后的各个flow集合
+     */
+    public List<List<Flow>> split(List<Workflow> workflows, int count) {
+        if (null == workflows) {
+            return null;
+        }
+        List<Flow> flows = new ArrayList<>();
+        List<List<Flow>> ret = new ArrayList<>();
+        for (Workflow wf : workflows) {
+            flows.addAll(wf.flows);
+        }
+        int size = flows.size();
+        if (size <= count) {
+            ret.add(flows);
+        } else {
+            int pre = size / count;
+            int last = size % count;
+            // 前pre个集合，每个大小都是count个元素
+            for (int i = 0; i < pre; i++) {
+                List<Flow> itemList = new ArrayList<>();
+                for (int j = 0; j < count; j++) {
+                    itemList.add(flows.get(i * count + j));
+                }
+                ret.add(itemList);
+            }
+            if (last > 0) {
+                List<Flow> itemList = new ArrayList<>();
+                for (int i = 0; i < last; i++) {
+                    itemList.add(flows.get(pre * count + i));
+                }
+                ret.add(itemList);
+            }
+        }
+        return ret;
+    }
 
     public List<Node> getNodes() {
         return nodes;
@@ -322,12 +461,11 @@ public class MarkovSolution {
         return workflows;
     }
 
-
-    public Set<XVar> getxVars() {
+    public List<XVar> getxVars() {
         return xVars;
     }
 
-    public Set<YVar> getyVars() {
+    public List<YVar> getyVars() {
         return yVars;
     }
 }

@@ -5,12 +5,13 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 
 public class TestFunctional {
     final static String CONFIG_FILE = "config.properties";
 
     @Test
-    public void testReadData() {
+    public void testReadData() throws ExecutionException, InterruptedException {
         Properties configProperties = FileTool.loadPropertiesFromFile(CONFIG_FILE);
         MarkovSolution solution = new MarkovSolution(configProperties);
         solution.initializeData();
@@ -33,7 +34,7 @@ public class TestFunctional {
         solution.assignTask();
         int taskNum = 0;
         int flowNum = 0;
-        for(Workflow wf : solution.getWorkflows()){
+        for (Workflow wf : solution.getWorkflows()) {
             taskNum += wf.getTasks().size();
             flowNum += wf.flows.size();
         }
@@ -42,18 +43,22 @@ public class TestFunctional {
         // calculate system metrics
         SystemMetrics systemMetrics = solution.calculateSystemMetrics(solution.getxVars(), solution.getyVars());
         Assert.assertNotNull(systemMetrics);
+        // switch solution
+        Action action = solution.switchSolution();
+        Assert.assertNotNull(action);
+
     }
 
     @Test
     public void testSomething() {
         Set<Task> set = new HashSet<>();
-        Task task = new Task(1,3,90.0);
+        Task task = new Task(1, 3, 90.0);
         set.add(task);
-        for(Task t : set){
+        for (Task t : set) {
             System.out.println(t.workflowId + " " + t.taskId + " " + t.neededResource);
         }
         task.neededResource = 66.6;
-        for(Task t : set){
+        for (Task t : set) {
             System.out.println(t.workflowId + " " + t.taskId + " " + t.neededResource);
         }
     }
