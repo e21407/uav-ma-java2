@@ -44,7 +44,7 @@ public class TestFunctional {
         SystemMetrics systemMetrics = solution.calculateSystemMetrics(solution.getxVars(), solution.getyVars());
         Assert.assertNotNull(systemMetrics);
         // switch solution
-        Action action = solution.switchSolution();
+        Action action = solution.selectNextSolution();
         Assert.assertNotNull(action);
 
     }

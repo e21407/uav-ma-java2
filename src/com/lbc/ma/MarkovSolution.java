@@ -315,17 +315,17 @@ public class MarkovSolution {
         return -1;
     }
 
-    public Action switchSolution() throws InterruptedException, ExecutionException {
+    public Action selectNextSolution() throws InterruptedException, ExecutionException {
         int count = 16;
         List<List<Flow>> flowList = split(workflows, count);
-        CompletionService<List<Pair<Action,Double>>> completionService = new ExecutorCompletionService<>(executor);
-        for(List<Flow> flowsToSetAction : flowList){
-            completionService.submit(()->setActions(flowsToSetAction, xVars, yVars));
+        CompletionService<List<Pair<Action, Double>>> completionService = new ExecutorCompletionService<>(executor);
+        for (List<Flow> flowsToSetAction : flowList) {
+            completionService.submit(() -> setActions(flowsToSetAction, xVars, yVars));
         }
-        List<Pair<Action,Double>> actions = new ArrayList<>();
-        for(int i = 0; i < flowList.size(); i++){
+        List<Pair<Action, Double>> actions = new ArrayList<>();
+        for (int i = 0; i < flowList.size(); i++) {
             List<Pair<Action, Double>> resultActions = completionService.take().get();
-            if (null == resultActions){
+            if (null == resultActions) {
                 System.out.println("多线程设置Action失败");
                 System.exit(-1);
             }
@@ -350,7 +350,7 @@ public class MarkovSolution {
                 newNodeForSuccTask = nodes.get(nodeIdx);
             }
             List<XVar> xVarsCopy = new ArrayList<>();
-            for(XVar x: xVars){
+            for (XVar x : xVars) {
                 xVarsCopy.add((XVar) x.clone());
             }
             removeXVar(workflowId, succTask.taskId, xVarsCopy);
@@ -358,7 +358,7 @@ public class MarkovSolution {
             xVarsCopy.add(newXVar);
 
             List<YVar> yVarsCopy = new ArrayList<>();
-            for(YVar y : yVars){
+            for (YVar y : yVars) {
                 yVarsCopy.add((YVar) y.clone());
             }
             removeYVar(workflowId, currTask.taskId, succTask.taskId, yVarsCopy);
@@ -381,25 +381,30 @@ public class MarkovSolution {
         double oldPerformance = oldSystemMetrics.getPerformance();
         double newPerformance = newSystemMetrics.getPerformance();
         double beta = Double.parseDouble((String) configProperties.get("beta"));
-        return Math.exp(0.5 * beta * (newPerformance - oldPerformance));
+        double ret = Math.exp(0.5 * beta * (newPerformance - oldPerformance));
+        ret = Math.min(ret, Double.MAX_VALUE);
+        ret = Math.max(ret, Double.MIN_VALUE);
+        return ret;
     }
 
     private void removeYVar(int wfId, int currTaskId, int succTaskId, List<YVar> yVars) {
         Iterator<YVar> iterator = yVars.iterator();
-        while (iterator.hasNext()){
+        while (iterator.hasNext()) {
             YVar yVar = iterator.next();
             if (yVar.workflowId == wfId && yVar.currTaskId == currTaskId && yVar.succTaskId == succTaskId) {
                 iterator.remove();
+                return;
             }
         }
     }
 
     private void removeXVar(int wfId, int taskId, List<XVar> xVars) {
         Iterator<XVar> iterator = xVars.iterator();
-        while (iterator.hasNext()){
+        while (iterator.hasNext()) {
             XVar xVar = iterator.next();
             if (xVar.workflowId == wfId && xVar.taskId == taskId) {
                 iterator.remove();
+                return;
             }
         }
     }
@@ -445,6 +450,57 @@ public class MarkovSolution {
         return ret;
     }
 
+    private void printSystemMetrics(int t, SystemMetrics metrics) {
+        double performance = metrics.getPerformance();
+        double throughput = metrics.throughput;
+        double computeCost = metrics.computeCost;
+        double routingCost = metrics.routingCost;
+        String infoStr = String.format("t: %d\tp: %.2f\tthr: %.2f\tcCost: %.2f\trCost: %.2f", t, performance, throughput,
+                computeCost, routingCost);
+        System.out.println(infoStr);
+        // todo log
+    }
+
+    private void doAction(Action action) {
+        removeXVar(action.wfId, action.succTaskId, this.xVars);
+        XVar xVar = new XVar(action.wfId, action.succTaskId, action.newNodeForSuccTask);
+        this.xVars.add(xVar);
+        removeYVar(action.wfId, action.currTaskId, action.succTaskId, this.yVars);
+        YVar yVar = new YVar(action.wfId, action.newPathId, action.currTaskId, action.succTaskId);
+        this.yVars.add(yVar);
+    }
+
+    private void printNodeLoadInfo(List<XVar> xVars) {
+        String[] nodeInfo = new String[nodes.size()];
+        for(int i = 0; i < nodeInfo.length; i++){
+            nodeInfo[i] = "";
+        }
+        for (XVar xVar : xVars) {
+            String loadInfo = "(" + xVar.workflowId + "," + xVar.taskId + ")";
+            nodeInfo[xVar.nodeId-1] += loadInfo + "\t";
+        }
+        for (int i = 0; i < nodeInfo.length; i++) {
+            System.out.print("[" + (i + 1) + "]: ");
+            System.out.println(nodeInfo[i]);
+        }
+    }
+
+    public void markovFunction() throws ExecutionException, InterruptedException {
+        assignTask();
+        int T = Integer.parseInt(configProperties.getProperty("iterationCount"));
+        int t = 0;
+        SystemMetrics systemMetrics = calculateSystemMetrics(this.xVars, this.yVars);
+        printSystemMetrics(t, systemMetrics);
+        while (t++ < T) {
+            Action action = selectNextSolution();
+            doAction(action);
+            systemMetrics = calculateSystemMetrics(this.xVars, this.yVars);
+            printSystemMetrics(t, systemMetrics);
+        }
+        printNodeLoadInfo(this.xVars);
+    }
+
+    /////////////////////////////////////////////////////////////////////////
     public List<Node> getNodes() {
         return nodes;
     }
