@@ -16,6 +16,7 @@ public class MarkovSolution {
     Properties configProperties;
     WorkflowGenerator workflowGenerator;
     static Random random = new Random();
+    static final double MAX_EXPONENT = 710;
 
     private static int MAX_THREAD_COUNT = 16;
     private Executor executor = Executors.newFixedThreadPool(MAX_THREAD_COUNT);
@@ -381,10 +382,25 @@ public class MarkovSolution {
         double oldPerformance = oldSystemMetrics.getPerformance();
         double newPerformance = newSystemMetrics.getPerformance();
         double beta = Double.parseDouble((String) configProperties.get("beta"));
-        double ret = Math.exp(0.5 * beta * (newPerformance - oldPerformance));
+        double performanceGap = newPerformance - oldPerformance;
+        double scaleGap = scale(performanceGap, newSystemMetrics.throughput);
+        double ret = Math.exp(0.5 * beta * scaleGap);
         ret = Math.min(ret, Double.MAX_VALUE);
-        ret = Math.max(ret, Double.MIN_VALUE);
+//        ret = Math.max(ret, Double.MIN_VALUE);
         return ret;
+    }
+
+    /**
+     * 根据一个最大值max对obj进行缩放, max >= obj
+     * @param obj
+     * @param max
+     * @return
+     */
+    private double scale(double obj, double max){
+        if (obj > max){
+            return MAX_EXPONENT;
+        }
+        return MAX_EXPONENT * obj / max;
     }
 
     private void removeYVar(int wfId, int currTaskId, int succTaskId, List<YVar> yVars) {

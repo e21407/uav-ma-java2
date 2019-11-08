@@ -63,4 +63,22 @@ public class TestFunctional {
         }
     }
 
+    @Test
+    public void teatExp(){
+        int i = 0;
+        double result = 0;
+        while (result < Double.MAX_VALUE){
+            result = Math.exp(i);
+            System.out.println(result);
+            i++;
+        }
+        System.out.println(i);
+    }
+
+    @Test
+    public void testScale(){
+        int MaxScale = 711;
+
+    }
+
 }
