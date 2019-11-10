@@ -13,10 +13,11 @@ import java.util.concurrent.*;
 
 public class MarkovSolution {
     static protected Logger logger = Logger.getLogger(MarkovSolution.class);
-    Properties configProperties;
-    WorkflowGenerator workflowGenerator;
-    static Random random = new Random();
-    static final double MAX_EXPONENT = 710;
+    private Properties configProperties;
+    private WorkflowGenerator workflowGenerator;
+    private static Random random = new Random();
+    private static final double MAX_EXPONENT = 710;
+    private static final String ANNOTATION_NOTE = "# ";
 
     private static int MAX_THREAD_COUNT = 16;
     private Executor executor = Executors.newFixedThreadPool(MAX_THREAD_COUNT);
@@ -53,10 +54,30 @@ public class MarkovSolution {
         generateOriginalWorkflow();
     }
 
+    /**
+     * 读取配置文件，每行前面加入一个注释符号#
+     *
+     * @return 结果
+     */
+    private String processLoadConfigStr() {
+        String stringFromFile = FileTool.getStringFromFile(Main.CONFIG_FILE);
+        String[] splitStr = stringFromFile.split("\n");
+        String ret = "";
+        for (String aLine : splitStr) {
+            aLine = aLine.trim();
+            if("".equals(aLine) || aLine.startsWith("#")){
+                continue;
+            }
+            ret += ANNOTATION_NOTE +  aLine + "\n";
+        }
+        return ret;
+    }
+
     // ↓↓↓↓↓↓↓↓↓↓↓↓↓read data from file↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
     public void initializeData() {
-        logger.info("开始初始化读取数据...");
+        logger.info(ANNOTATION_NOTE + "开始初始化读取数据...");
         long startTime = System.currentTimeMillis();
+        logger.info(processLoadConfigStr());
         //读取节点信息
         readNodeInfo();
         //读取link信息
@@ -67,7 +88,7 @@ public class MarkovSolution {
         long endTime = System.currentTimeMillis();
         BigDecimal durTime = new BigDecimal(endTime - startTime);
         durTime = durTime.divide(new BigDecimal(1000));
-        logger.info("读取处理文件耗时：" + durTime.setScale(4) + "s");
+        logger.info(ANNOTATION_NOTE + "读取处理文件耗时：" + durTime.setScale(4) + "s");
     }
 
     private void readLinkInfo() {
@@ -114,16 +135,12 @@ public class MarkovSolution {
                 continue;
             }
             String[] lineContent = aLine.split("\t");
-            int srcNodeId = Integer.valueOf(lineContent[1]);
-            int dstNodeId = Integer.valueOf(lineContent[3]);
+            int srcNodeId = Integer.parseInt(lineContent[1]);
+            int dstNodeId = Integer.parseInt(lineContent[3]);
             String pathContent = lineContent[5];
             paths.put(pathId_idx, pathContent);
             String pathKey = srcNodeId < dstNodeId ? srcNodeId + "_" + dstNodeId : dstNodeId + "_" + srcNodeId;
-            List<Integer> pathIds = candPathIdFor2Nodes.get(pathKey);
-            if (null == pathIds) {
-                pathIds = new ArrayList<>();
-                candPathIdFor2Nodes.put(pathKey, pathIds);
-            }
+            List<Integer> pathIds = candPathIdFor2Nodes.computeIfAbsent(pathKey, k -> new ArrayList<>());
             pathIds.add(pathId_idx++);
         }
     }
@@ -131,16 +148,15 @@ public class MarkovSolution {
 
     private WorkflowGenerator getWorkflowGenerator() {
         String workflowModeFilePath = configProperties.getProperty("workflowModeFilePath");
-        WorkflowGenerator workflowGenerator = WorkflowGenerator.getWorkflowGenerator(workflowModeFilePath);
-        return workflowGenerator;
+        return WorkflowGenerator.getWorkflowGenerator(workflowModeFilePath);
     }
 
     private void generateOriginalWorkflow() {
-        int originalWorkflowNum = Integer.valueOf(configProperties.getProperty("originalWorkflowNum"));
-        int taskBaseCap = Integer.valueOf(configProperties.getProperty("taskBaseCap"));
-        int taskRdmCap = Integer.valueOf(configProperties.getProperty("taskRdmCap"));
-        int bandwidthBase = Integer.valueOf(configProperties.getProperty("bandwidthBase"));
-        int bandwidthRdm = Integer.valueOf(configProperties.getProperty("bandwidthRdm"));
+        int originalWorkflowNum = Integer.parseInt(configProperties.getProperty("originalWorkflowNum"));
+        int taskBaseCap = Integer.parseInt(configProperties.getProperty("taskBaseCap"));
+        int taskRdmCap = Integer.parseInt(configProperties.getProperty("taskRdmCap"));
+        int bandwidthBase = Integer.parseInt(configProperties.getProperty("bandwidthBase"));
+        int bandwidthRdm = Integer.parseInt(configProperties.getProperty("bandwidthRdm"));
         while (originalWorkflowNum-- > 0) {
             Workflow workflow = workflowGenerator.generateWorkflow(0, taskBaseCap, taskRdmCap, bandwidthBase, bandwidthRdm);
             workflows.add(workflow);
@@ -187,7 +203,7 @@ public class MarkovSolution {
     /**
      * 检查一个任务是否已经被分配
      *
-     * @param task
+     * @param task 任务
      * @return 若已分配返回该任务分配的nodeId，否则返回-1
      */
     private int checkWhetherATaskHasAssignment(Task task) {
@@ -391,13 +407,14 @@ public class MarkovSolution {
     }
 
     /**
-     * 根据一个最大值max对obj进行缩放, max >= obj
-     * @param obj
-     * @param max
-     * @return
+     * 根据一个最大值max对obj进行放缩, max >= obj
+     *
+     * @param obj 目标值
+     * @param max 最大值
+     * @return 放缩后的值
      */
-    private double scale(double obj, double max){
-        if (obj > max){
+    private double scale(double obj, double max) {
+        if (obj > max) {
             return MAX_EXPONENT;
         }
         return MAX_EXPONENT * obj / max;
@@ -432,7 +449,7 @@ public class MarkovSolution {
      * @param count     每个集合元素个数
      * @return 返回拆分后的各个flow集合
      */
-    public List<List<Flow>> split(List<Workflow> workflows, int count) {
+    private List<List<Flow>> split(List<Workflow> workflows, int count) {
         if (null == workflows) {
             return null;
         }
@@ -488,12 +505,10 @@ public class MarkovSolution {
 
     private void printNodeLoadInfo(List<XVar> xVars) {
         String[] nodeInfo = new String[nodes.size()];
-        for(int i = 0; i < nodeInfo.length; i++){
-            nodeInfo[i] = "";
-        }
+        Arrays.fill(nodeInfo, "");
         for (XVar xVar : xVars) {
             String loadInfo = "(" + xVar.workflowId + "," + xVar.taskId + ")";
-            nodeInfo[xVar.nodeId-1] += loadInfo + "\t";
+            nodeInfo[xVar.nodeId - 1] += loadInfo + "\t";
         }
         for (int i = 0; i < nodeInfo.length; i++) {
             System.out.print("[" + (i + 1) + "]: ");
