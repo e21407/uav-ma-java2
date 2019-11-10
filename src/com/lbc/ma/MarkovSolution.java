@@ -1,8 +1,10 @@
 package com.lbc.ma;
 
 import com.lbc.ma.structure.*;
+import com.lbc.ma.tool.CommonTool;
 import com.lbc.ma.tool.FileTool;
 import com.lbc.ma.tool.WorkflowGenerator;
+import org.apache.commons.math3.analysis.function.Add;
 import org.apache.commons.math3.distribution.EnumeratedDistribution;
 import org.apache.commons.math3.util.Pair;
 import org.apache.log4j.Logger;
@@ -170,23 +172,23 @@ public class MarkovSolution {
                 int currTaskNodeId = checkWhetherATaskHasAssignment(flow.currTask);
                 int succTaskNodeId = checkWhetherATaskHasAssignment(flow.succTask);
                 if (-1 == currTaskNodeId) {
-                    int nodeIdx = random.nextInt(uavNodes.size());
-                    currTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                    int nodeIdx = random.nextInt(nodes.size());
+                    currTaskNodeId = nodes.get(nodeIdx).nodeId;
                     // 避免succTask已分配的情况下currTask和succTask分配到同一个节点
                     while (currTaskNodeId == succTaskNodeId) {
-                        nodeIdx = random.nextInt(uavNodes.size());
-                        currTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                        nodeIdx = random.nextInt(nodes.size());
+                        currTaskNodeId = nodes.get(nodeIdx).nodeId;
                     }
                     XVar xVar = new XVar(wf.workflowId, flow.currTask.taskId, currTaskNodeId);
                     xVars.add(xVar);
                 }
                 if (-1 == succTaskNodeId) {
-                    int nodeIdx = random.nextInt(uavNodes.size());
-                    succTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                    int nodeIdx = random.nextInt(nodes.size());
+                    succTaskNodeId = nodes.get(nodeIdx).nodeId;
                     // 避免currTask和succTask分配到同一个节点
                     while (currTaskNodeId == succTaskNodeId) {
-                        nodeIdx = random.nextInt(uavNodes.size());
-                        succTaskNodeId = uavNodes.get(nodeIdx).nodeId;
+                        nodeIdx = random.nextInt(nodes.size());
+                        succTaskNodeId = nodes.get(nodeIdx).nodeId;
                     }
                     XVar xVar = new XVar(wf.workflowId, flow.succTask.taskId, succTaskNodeId);
                     xVars.add(xVar);
@@ -334,26 +336,51 @@ public class MarkovSolution {
 
     public Action selectNextSolution() throws InterruptedException, ExecutionException {
         int count = 16;
-        List<List<Flow>> flowList = split(workflows, count);
-        CompletionService<List<Pair<Action, Double>>> completionService = new ExecutorCompletionService<>(executor);
+        List<Flow> allFlows = getAllFlows();
+        List<List<Flow>> flowList = CommonTool.splitList(allFlows, count);
+        CompletionService<List<Action>> completionService = new ExecutorCompletionService<>(executor);
         for (List<Flow> flowsToSetAction : flowList) {
             completionService.submit(() -> setActions(flowsToSetAction, xVars, yVars));
         }
-        List<Pair<Action, Double>> actions = new ArrayList<>();
+        List<Action> actions = new ArrayList<>();
         for (int i = 0; i < flowList.size(); i++) {
-            List<Pair<Action, Double>> resultActions = completionService.take().get();
+            List<Action> resultActions = completionService.take().get();
             if (null == resultActions) {
                 System.out.println("多线程设置Action失败");
                 System.exit(-1);
             }
             actions.addAll(resultActions);
         }
-        EnumeratedDistribution<Action> distribution = new EnumeratedDistribution<>(actions);
+        List<Pair<Action, Double>> actionPairs = setActionTransferRate(actions);
+        EnumeratedDistribution<Action> distribution = new EnumeratedDistribution<>(actionPairs);
         return distribution.sample();
     }
 
-    private List<Pair<Action, Double>> setActions(List<Flow> flows, List<XVar> xVars, List<YVar> yVars) throws CloneNotSupportedException {
+    private List<Pair<Action, Double>> setActionTransferRate(List<Action> actions){
+        double maxPerformanceGap = Double.MIN_VALUE;
         List<Pair<Action, Double>> ret = new ArrayList<>();
+        for(Action action : actions) {
+            double performanceGap = action.newSystemMetrics.getPerformance() - action.oldSystemMetrics.getPerformance();
+            maxPerformanceGap = Math.max(maxPerformanceGap, performanceGap);
+        }
+        for(Action action : actions) {
+            double improvement = calculateImprovement(action.oldSystemMetrics, action.newSystemMetrics, maxPerformanceGap);
+            Pair<Action, Double> aPair = new Pair<>(action, improvement);
+            ret.add(aPair);
+        }
+        return ret;
+    }
+
+    private List<Flow> getAllFlows(){
+        List<Flow> ret = new ArrayList<>();
+        for(Workflow wf : workflows){
+            ret.addAll(wf.flows);
+        }
+        return ret;
+    }
+
+    private List<Action> setActions(List<Flow> flows, List<XVar> xVars, List<YVar> yVars) throws CloneNotSupportedException {
+        List<Action> ret = new ArrayList<>();
         for (Flow flow : flows) {
             Integer workflowId = flow.currTask.workflowId;
             Task currTask = flow.currTask;
@@ -386,20 +413,19 @@ public class MarkovSolution {
 
             SystemMetrics oldSystemMetrics = calculateSystemMetrics(xVars, yVars);
             SystemMetrics newSystemMetrics = calculateSystemMetrics(xVarsCopy, yVarsCopy);
-            double improvement = calculateImprovement(oldSystemMetrics, newSystemMetrics);
-            Action action = new Action(workflowId, currTask.taskId, succTask.taskId, newPathId, nodeIdOfSuccTask, newNodeForSuccTask.nodeId);
-            Pair<Action, Double> pair = new Pair<>(action, improvement);
-            ret.add(pair);
+            Action action = new Action(workflowId, currTask.taskId, succTask.taskId, newPathId, nodeIdOfSuccTask,
+                    newNodeForSuccTask.nodeId, oldSystemMetrics, newSystemMetrics);
+            ret.add(action);
         }
         return ret;
     }
 
-    private double calculateImprovement(SystemMetrics oldSystemMetrics, SystemMetrics newSystemMetrics) {
+    private double calculateImprovement(SystemMetrics oldSystemMetrics, SystemMetrics newSystemMetrics, Double scaleMax) {
         double oldPerformance = oldSystemMetrics.getPerformance();
         double newPerformance = newSystemMetrics.getPerformance();
         double beta = Double.parseDouble((String) configProperties.get("beta"));
         double performanceGap = newPerformance - oldPerformance;
-        double scaleGap = scale(performanceGap, newSystemMetrics.throughput);
+        double scaleGap = scaleMax > MAX_EXPONENT ? scale(performanceGap, scaleMax) : performanceGap;
         double ret = Math.exp(0.5 * beta * scaleGap);
         ret = Math.min(ret, Double.MAX_VALUE);
 //        ret = Math.max(ret, Double.MIN_VALUE);
@@ -442,47 +468,6 @@ public class MarkovSolution {
         }
     }
 
-    /**
-     * 拆分工作流集合
-     *
-     * @param workflows 要拆分的工作流
-     * @param count     每个集合元素个数
-     * @return 返回拆分后的各个flow集合
-     */
-    private List<List<Flow>> split(List<Workflow> workflows, int count) {
-        if (null == workflows) {
-            return null;
-        }
-        List<Flow> flows = new ArrayList<>();
-        List<List<Flow>> ret = new ArrayList<>();
-        for (Workflow wf : workflows) {
-            flows.addAll(wf.flows);
-        }
-        int size = flows.size();
-        if (size <= count) {
-            ret.add(flows);
-        } else {
-            int pre = size / count;
-            int last = size % count;
-            // 前pre个集合，每个大小都是count个元素
-            for (int i = 0; i < pre; i++) {
-                List<Flow> itemList = new ArrayList<>();
-                for (int j = 0; j < count; j++) {
-                    itemList.add(flows.get(i * count + j));
-                }
-                ret.add(itemList);
-            }
-            if (last > 0) {
-                List<Flow> itemList = new ArrayList<>();
-                for (int i = 0; i < last; i++) {
-                    itemList.add(flows.get(pre * count + i));
-                }
-                ret.add(itemList);
-            }
-        }
-        return ret;
-    }
-
     private void printSystemMetrics(int t, SystemMetrics metrics) {
         double performance = metrics.getPerformance();
         double throughput = metrics.throughput;
@@ -490,8 +475,7 @@ public class MarkovSolution {
         double routingCost = metrics.routingCost;
         String infoStr = String.format("t: %d\tp: %.2f\tthr: %.2f\tcCost: %.2f\trCost: %.2f", t, performance, throughput,
                 computeCost, routingCost);
-        System.out.println(infoStr);
-        // todo log
+        logger.info(infoStr);
     }
 
     private void doAction(Action action) {
@@ -503,19 +487,26 @@ public class MarkovSolution {
         this.yVars.add(yVar);
     }
 
-    private void printNodeLoadInfo(List<XVar> xVars) {
+    private void showNodeLoadInfo(List<XVar> xVars) {
         String[] nodeInfo = new String[nodes.size()];
         Arrays.fill(nodeInfo, "");
         for (XVar xVar : xVars) {
             String loadInfo = "(" + xVar.workflowId + "," + xVar.taskId + ")";
             nodeInfo[xVar.nodeId - 1] += loadInfo + "\t";
         }
+        String allNodeInfoStr = ANNOTATION_NOTE + "node load information:\n";
         for (int i = 0; i < nodeInfo.length; i++) {
-            System.out.print("[" + (i + 1) + "]: ");
-            System.out.println(nodeInfo[i]);
+            allNodeInfoStr += ANNOTATION_NOTE +  "[" + (i + 1) + "]: ";
+            allNodeInfoStr += nodeInfo[i] + "\n";
         }
+        logger.info(allNodeInfoStr);
     }
 
+    /**
+     * 算法迭代主体
+     * @throws ExecutionException
+     * @throws InterruptedException
+     */
     public void markovFunction() throws ExecutionException, InterruptedException {
         assignTask();
         int T = Integer.parseInt(configProperties.getProperty("iterationCount"));
@@ -528,7 +519,7 @@ public class MarkovSolution {
             systemMetrics = calculateSystemMetrics(this.xVars, this.yVars);
             printSystemMetrics(t, systemMetrics);
         }
-        printNodeLoadInfo(this.xVars);
+        showNodeLoadInfo(this.xVars);
     }
 
     /////////////////////////////////////////////////////////////////////////
