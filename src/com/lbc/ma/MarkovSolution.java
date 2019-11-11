@@ -67,7 +67,7 @@ public class MarkovSolution {
         String ret = "";
         for (String aLine : splitStr) {
             aLine = aLine.trim();
-            if("".equals(aLine) || aLine.startsWith("#")){
+            if("".equals(aLine.trim()) || aLine.startsWith("#")){
                 continue;
             }
             ret += ANNOTATION_NOTE +  aLine + "\n";
@@ -122,7 +122,7 @@ public class MarkovSolution {
             Double nodeCapacity = Double.valueOf(lineContent[3]);
             Node node = new Node(nodeType, nodeId, nodeCapacity);
             nodes.add(node);
-            if ("U_ID".equals(nodeType)) {
+            if ("U_ID".equals(nodeType.trim())) {
                 uavNodes.add(node);
             }
         }
