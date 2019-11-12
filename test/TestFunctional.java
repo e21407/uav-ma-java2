@@ -41,7 +41,7 @@ public class TestFunctional {
         Assert.assertEquals(taskNum, solution.getxVars().size());
         Assert.assertEquals(flowNum, solution.getyVars().size());
         // calculate system metrics
-        SystemMetrics systemMetrics = solution.calculateSystemMetrics(solution.getxVars(), solution.getyVars());
+        SystemMetrics systemMetrics = solution.getSystemMetrics(solution.getxVars(), solution.getyVars());
         Assert.assertNotNull(systemMetrics);
         // switch solution
         Action action = solution.selectNextSolution();

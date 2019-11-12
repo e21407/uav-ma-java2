@@ -4,7 +4,6 @@ import com.lbc.ma.structure.*;
 import com.lbc.ma.tool.CommonTool;
 import com.lbc.ma.tool.FileTool;
 import com.lbc.ma.tool.WorkflowGenerator;
-import org.apache.commons.math3.analysis.function.Add;
 import org.apache.commons.math3.distribution.EnumeratedDistribution;
 import org.apache.commons.math3.util.Pair;
 import org.apache.log4j.Logger;
@@ -67,10 +66,10 @@ public class MarkovSolution {
         String ret = "";
         for (String aLine : splitStr) {
             aLine = aLine.trim();
-            if("".equals(aLine.trim()) || aLine.startsWith("#")){
+            if ("".equals(aLine.trim()) || aLine.startsWith("#")) {
                 continue;
             }
-            ret += ANNOTATION_NOTE +  aLine + "\n";
+            ret += ANNOTATION_NOTE + aLine + "\n";
         }
         return ret;
     }
@@ -232,7 +231,7 @@ public class MarkovSolution {
         return candPathIds.get(pathIdx);
     }
 
-    public SystemMetrics calculateSystemMetrics(List<XVar> xVars, List<YVar> yVars) {
+    public SystemMetrics getSystemMetrics(List<XVar> xVars, List<YVar> yVars) {
         Map<Integer, Double> nodeLoadInfo = new HashMap<>();
         for (XVar xVar : xVars) {
             int nodeId = xVar.nodeId;
@@ -356,24 +355,26 @@ public class MarkovSolution {
         return distribution.sample();
     }
 
-    private List<Pair<Action, Double>> setActionTransferRate(List<Action> actions){
-        double maxPerformanceGap = Double.MIN_VALUE;
+    private List<Pair<Action, Double>> setActionTransferRate(List<Action> actions) {
+        double maxExpIndex = Double.MIN_VALUE;
         List<Pair<Action, Double>> ret = new ArrayList<>();
-        for(Action action : actions) {
+        double beta = Double.parseDouble((String) configProperties.get("beta"));
+        for (Action action : actions) {
             double performanceGap = action.newSystemMetrics.getPerformance() - action.oldSystemMetrics.getPerformance();
-            maxPerformanceGap = Math.max(maxPerformanceGap, performanceGap);
+            maxExpIndex = 0.5 * beta * performanceGap;
+            maxExpIndex = Math.max(maxExpIndex, performanceGap);
         }
-        for(Action action : actions) {
-            double improvement = calculateImprovement(action.oldSystemMetrics, action.newSystemMetrics, maxPerformanceGap);
+        for (Action action : actions) {
+            double improvement = calculateImprovement(action.oldSystemMetrics, action.newSystemMetrics, maxExpIndex);
             Pair<Action, Double> aPair = new Pair<>(action, improvement);
             ret.add(aPair);
         }
         return ret;
     }
 
-    private List<Flow> getAllFlows(){
+    private List<Flow> getAllFlows() {
         List<Flow> ret = new ArrayList<>();
-        for(Workflow wf : workflows){
+        for (Workflow wf : workflows) {
             ret.addAll(wf.flows);
         }
         return ret;
@@ -411,8 +412,8 @@ public class MarkovSolution {
             YVar newYVar = new YVar(workflowId, newPathId, currTask.taskId, succTask.taskId);
             yVarsCopy.add(newYVar);
 
-            SystemMetrics oldSystemMetrics = calculateSystemMetrics(xVars, yVars);
-            SystemMetrics newSystemMetrics = calculateSystemMetrics(xVarsCopy, yVarsCopy);
+            SystemMetrics oldSystemMetrics = getSystemMetrics(xVars, yVars);
+            SystemMetrics newSystemMetrics = getSystemMetrics(xVarsCopy, yVarsCopy);
             Action action = new Action(workflowId, currTask.taskId, succTask.taskId, newPathId, nodeIdOfSuccTask,
                     newNodeForSuccTask.nodeId, oldSystemMetrics, newSystemMetrics);
             ret.add(action);
@@ -424,11 +425,10 @@ public class MarkovSolution {
         double oldPerformance = oldSystemMetrics.getPerformance();
         double newPerformance = newSystemMetrics.getPerformance();
         double beta = Double.parseDouble((String) configProperties.get("beta"));
-        double performanceGap = newPerformance - oldPerformance;
-        double scaleGap = scaleMax > MAX_EXPONENT ? scale(performanceGap, scaleMax) : performanceGap;
-        double ret = Math.exp(0.5 * beta * scaleGap);
+        double expIndex = 0.5 * beta * (newPerformance - oldPerformance);
+        expIndex = scaleMax > MAX_EXPONENT ? scale(expIndex, scaleMax) : expIndex;
+        double ret = Math.exp(expIndex);
         ret = Math.min(ret, Double.MAX_VALUE);
-//        ret = Math.max(ret, Double.MIN_VALUE);
         return ret;
     }
 
@@ -440,6 +440,7 @@ public class MarkovSolution {
      * @return 放缩后的值
      */
     private double scale(double obj, double max) {
+        System.out.println("scale hit!!!");
         if (obj > max) {
             return MAX_EXPONENT;
         }
@@ -496,7 +497,7 @@ public class MarkovSolution {
         }
         String allNodeInfoStr = ANNOTATION_NOTE + "node load information:\n";
         for (int i = 0; i < nodeInfo.length; i++) {
-            allNodeInfoStr += ANNOTATION_NOTE +  "[" + (i + 1) + "]: ";
+            allNodeInfoStr += ANNOTATION_NOTE + "[" + (i + 1) + "]: ";
             allNodeInfoStr += nodeInfo[i] + "\n";
         }
         logger.info(allNodeInfoStr);
@@ -504,6 +505,7 @@ public class MarkovSolution {
 
     /**
      * 算法迭代主体
+     *
      * @throws ExecutionException
      * @throws InterruptedException
      */
@@ -511,12 +513,12 @@ public class MarkovSolution {
         assignTask();
         int T = Integer.parseInt(configProperties.getProperty("iterationCount"));
         int t = 0;
-        SystemMetrics systemMetrics = calculateSystemMetrics(this.xVars, this.yVars);
+        SystemMetrics systemMetrics = getSystemMetrics(this.xVars, this.yVars);
         printSystemMetrics(t, systemMetrics);
         while (t++ < T) {
             Action action = selectNextSolution();
             doAction(action);
-            systemMetrics = calculateSystemMetrics(this.xVars, this.yVars);
+            systemMetrics = getSystemMetrics(this.xVars, this.yVars);
             printSystemMetrics(t, systemMetrics);
         }
         showNodeLoadInfo(this.xVars);
